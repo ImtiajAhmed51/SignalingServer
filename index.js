@@ -17,9 +17,15 @@ const app = http.createServer((req, res) => {
 
 let users = {};
 
-const io = socketIO.listen(app);
-io.sockets.on('connection', (socket) => {
-  console.log('A user connected');
+const io = socketIO(app, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
+});
+
+io.on('connection', (socket) => {
+  console.log('A user connected:', socket.id);
 
   socket.on('register', (username) => {
     users[username] = socket.id;
