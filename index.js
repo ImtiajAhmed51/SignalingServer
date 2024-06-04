@@ -23,7 +23,6 @@ var app = http.createServer(function (req, res) {
   console.log(`Server is listening on port ${port}`);
 });
 
-// Initialize socket.io
 var io = socketIO.listen(app);
 
 io.sockets.on("connection", function (socket) {
