@@ -1,70 +1,77 @@
-'use strict';
-
-const os = require('os');
-const nodeStatic = require('node-static');
-const http = require('http');
-const socketIO = require('socket.io');
+var http = require("http");
+var socketIO = require("socket.io");
 const port = process.env.PORT || 4000;
+var app = http
+  .createServer(function (req, res) {
+    // You can add logging or handle HTTP requests here if needed
+  })
+  .listen(port, () => {
+    console.log(`Server is running on port ${port}`);
+  });
 
-const fileServer = new nodeStatic.Server();
-const app = http.createServer((req, res) => {
-  fileServer.serve(req, res);
-}).listen(port, () => {
-  console.log(`Server listening on port ${port}`);
-}).on('error', (err) => {
-  console.error(`Server error: ${err}`);
-});
+var io = socketIO.listen(app);
+io.sockets.on("connection", function (socket) {
+  console.log("A new client connected");
 
-let users = {};
-
-const io = socketIO(app, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
+  // convenience function to log server messages on the client
+  function log() {
+    var array = ["Message from server:"];
+    array.push.apply(array, arguments);
+    socket.emit("log", array);
   }
-});
 
-io.on('connection', (socket) => {
-  console.log('A user connected:', socket.id);
-
-  socket.on('register', (username) => {
-    users[username] = socket.id;
-    console.log(`User registered: ${username}`);
-    io.emit('user_list', Object.keys(users));
+  socket.on("message", function (message) {
+    console.log("Received message from client:", message);
+    // for a real app, would be room-only (not broadcast)
+    socket.broadcast.emit("message", message);
   });
 
-  socket.on('call', (data) => {
-    const { from, to } = data;
-    if (users[to]) {
-      console.log(`Call from ${from} to ${to}`);
-      io.to(users[to]).emit('incoming_call', { from });
+  socket.on("create or join", function (room) {
+    console.log("Received request to create or join room " + room);
+
+    var clientsInRoom = io.sockets.adapter.rooms[room];
+    var numClients = clientsInRoom
+      ? Object.keys(clientsInRoom.sockets).length
+      : 0;
+    console.log("Room " + room + " now has " + numClients + " client(s)");
+
+    if (numClients === 0) {
+      socket.join(room);
+      console.log("Client ID " + socket.id + " created room " + room);
+      socket.emit("created", room, socket.id);
+    } else if (numClients === 1) {
+      console.log("Client ID " + socket.id + " joined room " + room);
+      io.sockets.in(room).emit("join", room);
+      socket.join(room);
+      socket.emit("joined", room, socket.id);
+      io.sockets.in(room).emit("ready");
     } else {
-      console.log(`User ${to} not found`);
+      // max two clients
+      socket.emit("full", room);
     }
   });
 
-  socket.on('accept_call', (data) => {
-    const { from, to } = data;
-    if (users[from]) {
-      console.log(`Call accepted by ${to} from ${from}`);
-      io.to(users[from]).emit('call_accepted', { to });
-    } else {
-      console.log(`User ${from} not found`);
+  socket.on("ipaddr", function () {
+    var ifaces = require("os").networkInterfaces();
+    for (var dev in ifaces) {
+      ifaces[dev].forEach(function (details) {
+        if (
+          details.family === "IPv4" &&
+          details.address !== "127.0.0.1" &&
+          details.address !== "10.173.1.175"
+        ) {
+          socket.emit("ipaddr", details.address);
+        }
+      });
     }
   });
 
-  socket.on('disconnect', () => {
-    for (const [username, socketId] of Object.entries(users)) {
-      if (socketId === socket.id) {
-        console.log(`User disconnected: ${username}`);
-        delete users[username];
-        io.emit('user_list', Object.keys(users));
-        break;
-      }
-    }
+  socket.on("bye", function () {
+    console.log("received bye");
   });
 
-  socket.on('error', (err) => {
-    console.error(`Socket error: ${err}`);
+  // Handle disconnection event
+  socket.on("disconnect", () => {
+    console.log("A client disconnected");
   });
 });
